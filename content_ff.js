@@ -2,27 +2,53 @@
   if (window.__ffBatchRunning) return;
   window.__ffBatchRunning = true;
 
+  function requestClose(delayMs = 1500) {
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ type: "CLOSE_ME" });
+    }, delayMs);
+  }
+
+  // Fallback: if HTMX handles the download directly, close the tab after it responds
+  document.body.addEventListener("htmx:afterRequest", () => {
+    requestClose(1500);
+  });
+
+  function normalizeUrl(rawUrl) {
+    if (!rawUrl) return null;
+    try {
+      return new URL(rawUrl, window.location.origin).href;
+    } catch {
+      return null;
+    }
+  }
+
   async function resolveDirectUrl(hxPost) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       const res = await fetch(hxPost, {
         method: "POST",
         credentials: "include",
+        redirect: "manual",
         headers: {
           "HX-Request": "true",
           "HX-Current-URL": window.location.href
         }
       });
 
-      const headerUrl =
-        res.headers.get("HX-Redirect") || res.headers.get("Location");
+      const headerUrl = normalizeUrl(
+        res.headers.get("HX-Redirect") ||
+          res.headers.get("HX-Location") ||
+          res.headers.get("Location")
+      );
       if (headerUrl && headerUrl.includes("/dl/")) {
         return headerUrl;
       }
 
-      const body = await res.text();
-      const match = body.match(/https?:\/\/[^\s"'<>]*\/dl\/[^\s"'<>]+/i);
-      if (match) {
-        return match[0];
+      if (res.type !== "opaqueredirect") {
+        const body = await res.text();
+        const match = body.match(/https?:\/\/[^\s"'<>]*\/dl\/[^\s"'<>]+/i);
+        if (match) {
+          return match[0];
+        }
       }
 
       if (attempt === 1) {
@@ -43,6 +69,7 @@
         type: "DOWNLOAD_DIRECT",
         url: directUrl
       });
+      requestClose(2500);
       return true;
     } catch (err) {
       console.error("FF Batch Downloader error:", err);
@@ -61,14 +88,17 @@
       const hxPost = dlBtn.getAttribute("hx-post");
 
       if (isManaged) {
-        // Bypass the DOM click & ad popup completely
-        startDirectDownload(hxPost);
+        startDirectDownload(hxPost).then((ok) => {
+          if (!ok) dlBtn.click();
+        });
       } else {
-        // Manual browsing: 1-click ad-free download + auto-close
-        dlBtn.removeAttribute("hx-post");
-        dlBtn.addEventListener("click", (e) => {
+        // Cloning strips HTMX's already-bound click listener cleanly
+        const cleanBtn = dlBtn.cloneNode(true);
+        cleanBtn.removeAttribute("hx-post");
+        dlBtn.replaceWith(cleanBtn);
+
+        cleanBtn.addEventListener("click", (e) => {
           e.preventDefault();
-          e.stopPropagation();
           startDirectDownload(hxPost);
         });
       }

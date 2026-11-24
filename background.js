@@ -83,6 +83,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         remaining: queue.length,
         inProgress: activeTabs.size + activeDownloads.size
       });
+    } else if (msg.type === "CLOSE_ME") {
+      const tabId = sender.tab?.id;
+      if (tabId) {
+        activeTabs.delete(tabId);
+        chrome.tabs.remove(tabId).catch(() => {});
+        await saveState();
+        if (isRunning) {
+          setTimeout(() => processQueue(), 1500);
+        }
+      }
+      sendResponse({ closed: true });
     } else if (msg.type === "DOWNLOAD_DIRECT") {
       const tabId = sender.tab?.id;
 
@@ -109,7 +120,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.error("Download failed to start:", err);
       }
 
-      // Close tab only after downloadId is registered so active count stays accurate
       if (tabId) {
         activeTabs.delete(tabId);
         chrome.tabs.remove(tabId).catch(() => {});
@@ -151,6 +161,30 @@ async function processQueue() {
     isProcessing = false;
   }
 }
+
+chrome.downloads.onCreated.addListener(async (downloadItem) => {
+  await readyPromise;
+
+  if (isRunning && !activeDownloads.has(downloadItem.id)) {
+    activeDownloads.add(downloadItem.id);
+    await saveState();
+  }
+
+  if (downloadItem.referrer && downloadItem.referrer.startsWith("https://fuckingfast.co/")) {
+    const refBase = downloadItem.referrer.split("#")[0];
+    const tabs = await chrome.tabs.query({ url: "https://fuckingfast.co/*" });
+    for (const tab of tabs) {
+      const tabBase = (tab.url || "").split("#")[0];
+      if (tabBase === refBase && tab.id) {
+        activeTabs.delete(tab.id);
+        await saveState();
+        setTimeout(() => {
+          chrome.tabs.remove(tab.id).catch(() => {});
+        }, 1000);
+      }
+    }
+  }
+});
 
 chrome.downloads.onChanged.addListener(async (delta) => {
   await readyPromise;

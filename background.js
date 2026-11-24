@@ -30,6 +30,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       remaining: queue.length,
       inProgress: activeTabs.size + activeDownloads.size
     });
+  } else if (msg.type === "CLOSE_ME") {
+    const tabId = sender.tab?.id;
+    if (tabId) {
+      activeTabs.delete(tabId);
+      chrome.tabs.remove(tabId).catch(() => {});
+    }
+    sendResponse({ closed: true });
   }
   return true;
 });

@@ -32,7 +32,6 @@ async function loadState() {
   seenDownloadUrls = new Set(data.seenDownloadUrls || []);
   isRunning = Boolean(data.isRunning);
 
-  // Prune any stale tab or download IDs after a service worker wake-up
   if (activeTabs.size > 0) {
     const openTabs = await chrome.tabs.query({});
     const openIds = new Set(openTabs.map((t) => t.id));
@@ -84,16 +83,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         remaining: queue.length,
         inProgress: activeTabs.size + activeDownloads.size
       });
-    } else if (msg.type === "CLOSE_ME") {
+    } else if (msg.type === "DOWNLOAD_DIRECT") {
       const tabId = sender.tab?.id;
+
+      if (isRunning && seenDownloadUrls.has(msg.url)) {
+        if (tabId) {
+          activeTabs.delete(tabId);
+          chrome.tabs.remove(tabId).catch(() => {});
+        }
+        await saveState();
+        sendResponse({ started: false, duplicate: true });
+        return;
+      }
+
+      if (isRunning) {
+        seenDownloadUrls.add(msg.url);
+      }
+
+      try {
+        const downloadId = await chrome.downloads.download({ url: msg.url });
+        if (isRunning && downloadId) {
+          activeDownloads.add(downloadId);
+        }
+      } catch (err) {
+        console.error("Download failed to start:", err);
+      }
+
+      // Close tab only after downloadId is registered so active count stays accurate
       if (tabId) {
         activeTabs.delete(tabId);
         chrome.tabs.remove(tabId).catch(() => {});
-        await saveState();
-        // Wait briefly so downloads.onCreated registers before refilling free slots
-        setTimeout(() => processQueue(), 1000);
       }
-      sendResponse({ closed: true });
+
+      await saveState();
+      if (isRunning) processQueue();
+      sendResponse({ started: true });
     }
   })();
 
@@ -127,23 +151,6 @@ async function processQueue() {
     isProcessing = false;
   }
 }
-
-chrome.downloads.onCreated.addListener(async (downloadItem) => {
-  await readyPromise;
-  if (!isRunning) return;
-
-  // Guard against duplicate downloads of the exact same URL
-  if (downloadItem.url && seenDownloadUrls.has(downloadItem.url)) {
-    chrome.downloads.cancel(downloadItem.id).catch(() => {});
-    return;
-  }
-
-  if (downloadItem.url) {
-    seenDownloadUrls.add(downloadItem.url);
-  }
-  activeDownloads.add(downloadItem.id);
-  await saveState();
-});
 
 chrome.downloads.onChanged.addListener(async (delta) => {
   await readyPromise;

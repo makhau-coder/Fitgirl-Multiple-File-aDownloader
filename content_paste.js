@@ -1,5 +1,6 @@
 ﻿(function () {
   const CHECKBOX_CLASS = "ff-batch-checkbox";
+  let wasRunning = false;
 
   function injectCheckboxes() {
     const anchors = document.querySelectorAll('#plaintext a[href^="https://fuckingfast.co/"]');
@@ -30,7 +31,7 @@
 
   function getSelectedLinks() {
     const checked = document.querySelectorAll(`.${CHECKBOX_CLASS}:checked`);
-    return Array.from(checked).map((cb) => cb.dataset.url);
+    return [...new Set(Array.from(checked).map((cb) => cb.dataset.url))];
   }
 
   function updateSelectedCount() {
@@ -142,13 +143,23 @@
         statusText.textContent = "No files selected.";
         return;
       }
-      chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, () => {
-        statusText.textContent = `Queued ${urls.length} files (10 at a time)...`;
+      startBtn.disabled = true;
+      startBtn.style.opacity = "0.5";
+      chrome.runtime.sendMessage({ type: "START_QUEUE", urls }, (res) => {
+        if (chrome.runtime.lastError) return;
+        if (res && res.status === "started") {
+          wasRunning = true;
+          statusText.textContent = `Queued ${urls.length} files (10 at a time)...`;
+        }
       });
     });
 
     stopBtn.addEventListener("click", () => {
       chrome.runtime.sendMessage({ type: "STOP_QUEUE" }, () => {
+        if (chrome.runtime.lastError) return;
+        wasRunning = false;
+        startBtn.disabled = false;
+        startBtn.style.opacity = "1";
         statusText.textContent = "Queue stopped.";
       });
     });
@@ -167,8 +178,17 @@
 
     setInterval(() => {
       chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
-        if (res && res.isRunning) {
+        if (chrome.runtime.lastError || !res) return;
+        if (res.isRunning) {
+          wasRunning = true;
+          startBtn.disabled = true;
+          startBtn.style.opacity = "0.5";
           statusText.textContent = `Active: ${res.inProgress} | Remaining: ${res.remaining}`;
+        } else if (wasRunning) {
+          wasRunning = false;
+          startBtn.disabled = false;
+          startBtn.style.opacity = "1";
+          statusText.textContent = "All downloads finished.";
         }
       });
     }, 2000);

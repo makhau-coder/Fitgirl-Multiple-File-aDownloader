@@ -1,4 +1,12 @@
 ﻿(function () {
+  if (window.__ffBatchRunning) return;
+  window.__ffBatchRunning = true;
+
+  let htmxTriggered = false;
+  document.body.addEventListener("htmx:beforeRequest", () => {
+    htmxTriggered = true;
+  });
+
   function closeTabAfterDelay(ms = 2500) {
     setTimeout(() => {
       chrome.runtime.sendMessage({ type: "CLOSE_ME" });
@@ -15,22 +23,24 @@
       clearInterval(waitForButton);
 
       if (isManaged) {
-        // First click (triggers ad / primes button)
+        // Click once
         dlBtn.click();
 
-        // Second click (triggers actual HTMX download), then close tab
+        // Only click a second time if the first click didn't trigger HTMX
         setTimeout(() => {
-          dlBtn.click();
+          if (!htmxTriggered) {
+            dlBtn.click();
+          }
           closeTabAfterDelay(2500);
         }, 1500);
       } else {
-        // Also close on manual 2nd click if you open a link yourself
-        let clicks = 0;
+        // Manual browsing: close once HTMX actually triggers the download
         dlBtn.addEventListener("click", () => {
-          clicks++;
-          if (clicks >= 2) {
-            closeTabAfterDelay(2500);
-          }
+          setTimeout(() => {
+            if (htmxTriggered) {
+              closeTabAfterDelay(2500);
+            }
+          }, 300);
         });
       }
     }, 500);

@@ -1,0 +1,26 @@
+﻿{
+  "manifest_version": 3,
+  "name": "FF Batch Downloader",
+  "version": "1.0",
+  "description": "Batch downloads fuckingfast.co links (10 concurrent downloads) from Pastebin.",
+  "permissions": ["tabs", "downloads"],
+  "host_permissions": [
+    "https://paste.fitgirl-repacks.site/*",
+    "https://fuckingfast.co/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://paste.fitgirl-repacks.site/*"],
+      "js": ["content_paste.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://fuckingfast.co/*"],
+      "js": ["content_ff.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
